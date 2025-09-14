@@ -105,76 +105,200 @@ function renderTimeline(entries){
   }).join('');
 }
 
-// D3 force-directed graph
-let simulation, svg, linkGroup, nodeGroup;
-function initGraph(){
-  if(typeof d3 === 'undefined'){
-    const g = document.getElementById('graph');
-    g.innerHTML = '<div style="padding:20px;color:#f87171;">D3 library failed to load. Check network connectivity or bundle a local copy.</div>';
-    console.error('D3 not loaded');
-    return;
+/**
+ * Analyze events for weak security practices & anomalies.
+ * Expected event fields (if present):
+ *  src_ip, dst_ip, src_port, dst_port, proto, payload, user_agent, timestamp
+ */
+function analyzeWeakPractices(events) {
+  const metrics = {
+    cleartext_admin: 0,
+    telnet: 0,
+    ftp: 0,
+    basic_auth: 0,
+    plain_http_pw: 0,
+    snmp_public: 0,
+    smb_external: 0,
+    db_exposed: 0,
+    outdated_tls: 0
+  };
+
+  const legacyClientPatterns = [
+    /MSIE\s+[67]\./i,
+    /Java\/1\.6/i,
+    /OpenSSL\/0\.9\.8/i,
+    /Windows NT 5\./i,
+    /FlashPlayer/i
+  ];
+  const legacyClientsCounter = {};
+
+  const scanners = {}; // src_ip -> { ports:Set, count:int }
+
+  const privRE = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.|127\.|169\.254\.)/;
+  const isPrivate = ip => privRE.test(ip || '');
+
+  const pwParam = /(password|passwd|pwd|login)=([^\s&#]{1,40})/i;
+
+  for (const ev of events) {
+    const dp = Number(ev.dst_port);
+    const sp = Number(ev.src_port);
+    const src = ev.src_ip || ev.src || ev.client || '';
+    const dst = ev.dst_ip || ev.dst || '';
+    const proto = (ev.proto || ev.protocol || '').toUpperCase();
+    const payload = (ev.payload || ev.data || '');
+    const userAgent = ev.user_agent || ev.ua || '';
+
+    // Track scanners
+    if (src) {
+      if (!scanners[src]) scanners[src] = { ports: new Set(), count: 0 };
+      if (dp) scanners[src].ports.add(dp);
+      scanners[src].count++;
+    }
+
+    // Cleartext admin protocols
+    if ([23, 513, 514].includes(dp)) {
+      metrics.cleartext_admin++;
+      if (dp === 23) metrics.telnet++;
+    }
+    // FTP
+    if ([20, 21].includes(dp)) metrics.ftp++;
+
+    // Basic Auth (HTTP)
+    if (/Authorization:\s*Basic\s+[A-Za-z0-9+/=]+/i.test(payload)) metrics.basic_auth++;
+
+    // Plain HTTP password submission (no TLS context + password param)
+    if (pwParam.test(payload) && !/TLS|SSL/i.test(payload) && /HTTP\/1\.[01]/.test(payload)) {
+      metrics.plain_http_pw++;
+    }
+
+    // SNMP v1/v2c public community
+    if ((dp === 161 || dp === 162) && /public/i.test(payload) && /community/i.test(payload)) {
+      metrics.snmp_public++;
+    }
+
+    // SMB external exposure
+    if (dp === 445 && src && dst && !(isPrivate(src) && isPrivate(dst))) {
+      metrics.smb_external++;
+    }
+
+    // DB ports exposed externally
+    if ([1433, 1521, 3306].includes(dp) && isPrivate(src) && !isPrivate(dst)) {
+      metrics.db_exposed++;
+    }
+
+    // Outdated TLS handshake indicator (very heuristic if payload has "SSLv3" or "SSLv2" or "TLSv1 ")
+    if (/SSLv2|SSLv3|TLSv1[^.]/.test(payload)) {
+      metrics.outdated_tls++;
+    }
+
+    // Legacy user agents
+    if (userAgent) {
+      legacyClientPatterns.forEach(re => {
+        if (re.test(userAgent)) {
+          const k = re.source;
+          legacyClientsCounter[k] = (legacyClientsCounter[k] || 0) + 1;
+        }
+      });
+    }
   }
-  svg = d3.select('#graph').append('svg').attr('width','100%').attr('height','100%');
-  linkGroup = svg.append('g').attr('class','links');
-  nodeGroup = svg.append('g').attr('class','nodes');
-  simulation = d3.forceSimulation()
-    .force('link', d3.forceLink().id(d=>d.id).distance(d=> d.type==='alert'?120:60))
-    .force('charge', d3.forceManyBody().strength(-250))
-    .force('center', d3.forceCenter(window.innerWidth/2, document.getElementById('graph').clientHeight/2));
-  window.addEventListener('resize', ()=>{
-    simulation.force('center', d3.forceCenter(window.innerWidth/2, document.getElementById('graph').clientHeight/2));
-  });
+
+  // Derive scanners (threshold = > 30 distinct dest ports or > 400 flows)
+  const scannerList = Object.entries(scanners)
+    .filter(([ip, obj]) => obj.ports.size > 30 || obj.count > 400)
+    .map(([ip, obj]) => ({ ip, distinctPorts: obj.ports.size, flows: obj.count }))
+    .sort((a,b) => b.distinctPorts - a.distinctPorts || b.flows - a.flows);
+
+  const legacyClients = Object.entries(legacyClientsCounter)
+    .map(([pattern, count]) => ({ pattern, count }))
+    .sort((a,b) => b.count - a.count);
+
+  return { metrics, scannerList, legacyClients };
 }
 
-function renderGraph(g){
-  if(!svg) initGraph();
-  const links = linkGroup.selectAll('line').data(g.edges, d=>d.source+"->"+d.target);
-  links.exit().remove();
-  const linksEnter = links.enter().append('line')
-    .attr('class', d=> 'edge '+ (d.alerts.length? 'alert':'') )
-    .attr('stroke-width', d=> Math.min(8, 1 + Math.log(d.count+1)));
-  links.merge(linksEnter);
+function renderSecurityFindings(events) {
+  const { metrics, scannerList, legacyClients } = analyzeWeakPractices(events);
 
-  const nodes = nodeGroup.selectAll('g').data(g.nodes, d=>d.id);
-  nodes.exit().remove();
-  const nodesEnter = nodes.enter().append('g').attr('class', d=> 'node-'+d.type).call(d3.drag()
-    .on('start', dragstarted)
-    .on('drag', dragged)
-    .on('end', dragended));
-  nodesEnter.append('circle')
-    .attr('r', d=> d.type==='alert'? 10: 6)
-    .attr('fill', d=> d.type==='alert'? '#f59e0b':'#3b82f6')
-    .append('title').text(d=>d.label);
-  nodesEnter.append('text')
-    .attr('x', 12)
-    .attr('dy','0.35em')
-    .style('font-size','10px')
-    .text(d=> d.label.slice(0,18));
-  nodes.merge(nodesEnter);
+  // Summary boxes
+  const summaryEl = document.getElementById('findings-summary');
+  if (!summaryEl) return;
+  const order = [
+    ['cleartext_admin','Cleartext Admin'],
+    ['telnet','Telnet'],
+    ['ftp','FTP'],
+    ['basic_auth','HTTP Basic'],
+    ['plain_http_pw','Plain PW Posts'],
+    ['snmp_public','SNMP Public'],
+    ['smb_external','SMB External'],
+    ['db_exposed','DB Exposed'],
+    ['outdated_tls','Outdated TLS']
+  ];
+  summaryEl.innerHTML = order.map(([k,label]) => {
+    const val = metrics[k];
+    const cls = val > 0
+      ? (['cleartext_admin','telnet','plain_http_pw','smb_external','db_exposed'].includes(k) ? 'finding-box bad' :
+         (['basic_auth','snmp_public','outdated_tls','ftp'].includes(k) ? 'finding-box warn' : 'finding-box'))
+      : 'finding-box';
+    return `<div class="${cls}">
+        <div class="label">${label}</div>
+        <div class="value">${val}</div>
+      </div>`;
+  }).join('');
 
-  simulation.nodes(g.nodes).on('tick', ticked);
-  simulation.force('link').links(g.edges);
-  simulation.alpha(0.8).restart();
+  // Bar chart
+  const chartEl = document.getElementById('findings-chart');
+  const data = order.map(([k,label]) => ({ key:k, label, value: metrics[k] })).filter(d => d.value > 0);
+  const max = Math.max(...data.map(d => d.value), 1);
+  chartEl.innerHTML = data.length === 0
+    ? '<div style="font-size:11px;opacity:0.6;">No weak practices detected in current sample.</div>'
+    : data.map(d => {
+        const hPct = (d.value / max) * 100;
+        const sev = d.value === 0 ? 'good'
+          : (['cleartext_admin','telnet','plain_http_pw','smb_external','db_exposed'].includes(d.key) ? 'bad'
+             : (['basic_auth','snmp_public','outdated_tls','ftp'].includes(d.key) ? 'warn' : 'good'));
+        return `<div class="bar-col" title="${d.label}: ${d.value}">
+            <div class="bar ${sev}" style="height:${Math.max(8,hPct)}%;"><span style="padding:2px;">${d.value}</span></div>
+            <div class="bar-label">${d.label}</div>
+        </div>`;
+      }).join('');
 
-  function ticked(){
-    linkGroup.selectAll('line')
-      .attr('x1', d=> d.source.x)
-      .attr('y1', d=> d.source.y)
-      .attr('x2', d=> d.target.x)
-      .attr('y2', d=> d.target.y);
-    nodeGroup.selectAll('g')
-      .attr('transform', d=>`translate(${d.x},${d.y})`);
+  // Scanners table
+  const scanBody = document.querySelector('#scanners-table tbody');
+  scanBody.innerHTML = scannerList.length
+    ? scannerList.slice(0,30).map(s => `<tr>
+        <td class="mono">${s.ip}</td>
+        <td>${s.distinctPorts}</td>
+        <td>${s.flows}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="3" class="empty">None detected (threshold >30 ports or >400 flows)</td></tr>';
+
+  // Legacy clients table
+  const lcBody = document.querySelector('#legacy-clients-table tbody');
+  lcBody.innerHTML = legacyClients.length
+    ? legacyClients.map(l => `<tr>
+        <td>${l.pattern}</td>
+        <td>${l.count}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="2" class="empty">No legacy user agents matched.</td></tr>';
+}
+
+// Hook into existing data load (adjust to your actual fetch / update logic)
+function integrateSecurityFindingsHook() {
+  // If you already have a global events array, call renderSecurityFindings(events)
+  if (window.allEvents) {
+    renderSecurityFindings(window.allEvents);
+  } else if (window.recentEvents) {
+    // fallback
+    renderSecurityFindings(window.recentEvents);
+  } else {
+    // If events arrive asynchronously, you can attach after fetch
+    document.addEventListener('events-updated', e => {
+      renderSecurityFindings(e.detail.events || []);
+    });
   }
 }
 
-function dragstarted(event, d){
-  if(!event.active) simulation.alphaTarget(0.3).restart();
-  d.fx = d.x; d.fy = d.y;
-}
-function dragged(event, d){ d.fx = event.x; d.fy = event.y; }
-function dragended(event, d){ if(!event.active) simulation.alphaTarget(0); d.fx=null; d.fy=null; }
+// Call after initial render
+document.addEventListener('DOMContentLoaded', integrateSecurityFindingsHook);
 
-window.addEventListener('DOMContentLoaded', ()=>{ 
-  initGraph(); 
-  loadAnalysis();
-});
+// If your existing code fetches events like fetch('/api/events').then(r=>r.json()).then(ev=>{ ... })
+// just add inside that .then block: renderSecurityFindings(ev);

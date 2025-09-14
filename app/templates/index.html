@@ -30,7 +30,35 @@
     <h2>Timeline</h2>
     <ol id="timeline" style="font-size:12px;max-height:240px;overflow:auto;"></ol>
   </div>
-</div>
+</div> <!-- end of current panels grid (#sidebar) -->
+
+<!-- Security Findings & Weak Practices Analysis -->
+<section id="security-findings">
+    <h2>Security Findings</h2>
+    <div id="findings-summary" class="findings-grid"></div>
+    <div id="findings-chart-wrapper">
+        <h3>Weak / Legacy Practice Counts</h3>
+        <div id="findings-chart" class="bars-chart" aria-label="Weak practice bar chart"></div>
+    </div>
+    <div id="scanner-table-wrapper">
+        <h3>Potential Port Scanners</h3>
+        <table class="mini-table" id="scanners-table">
+            <thead>
+                <tr><th>Source</th><th>Distinct Dest Ports</th><th>Total Flows</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <div id="legacy-clients-wrapper">
+        <h3>Legacy / Outdated Clients</h3>
+        <table class="mini-table" id="legacy-clients-table">
+            <thead>
+                <tr><th>Client Indicator</th><th>Count</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</section>
 <footer>Realtime view of Suricata fast.log interpreted for EMR context. (Demo)</footer>
 <script src="/static/js/app.js"></script>
 </body>
