@@ -9,6 +9,8 @@ async function loadAnalysis(){
       renderGraph(graphData);
       renderAnomalies(data.anomalies || []);
       renderEvents(data.recent_events || []);
+      renderAttackSummary(data);
+      renderTimeline(data.timeline || []);
       updateStats();
     } else if(data.error){
       console.error('Analysis error', data.error);
@@ -37,6 +39,23 @@ function renderAnomalies(anoms){
 function renderEvents(events){
   const el = document.getElementById('events');
   el.innerHTML = events.map(e=>`<li>${e.timestamp} <span class="bad">[P${e.priority||''}]</span> ${e.src_ip||''}:${e.src_port||''} -> ${e.dst_ip||''}:${e.dst_port||''} <em>${e.signature}</em></li>`).join('');
+}
+
+function renderAttackSummary(data){
+  const el = document.getElementById('attack-summary');
+  if(!el) return;
+  if(!data.most_aggressive_attacker){
+    el.textContent = 'No attacker data.';
+    return;
+  }
+  el.innerHTML = `<strong>Most Aggressive Attacker:</strong> ${data.most_aggressive_attacker} (${data.most_aggressive_attacker_count} events)<br/>`+
+                 `<strong>Most Attacked Defender:</strong> ${data.most_attacked_defender||'N/A'} (${data.most_attacked_defender_count||0} events)`;
+}
+
+function renderTimeline(entries){
+  const el = document.getElementById('timeline');
+  if(!el) return;
+  el.innerHTML = entries.map(t=>`<li><strong>${t.src_ip||'?'} -> ${t.dst_ip||'?'}:</strong> ${t.signature} <span style="color:#999">(${t.count} evts ${t.start} – ${t.end})</span></li>`).join('');
 }
 
 // D3 force-directed graph
@@ -111,6 +130,4 @@ function dragended(event, d){ if(!event.active) simulation.alphaTarget(0); d.fx=
 window.addEventListener('DOMContentLoaded', ()=>{ 
   initGraph(); 
   loadAnalysis();
-  const btn = document.getElementById('reload-btn');
-  if(btn) btn.addEventListener('click', reloadAnalysis);
 });

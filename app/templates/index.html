@@ -11,7 +11,6 @@
 <header>
   <h1>EMR Security Network Analyzer</h1>
   <div id="stats">Loading...</div>
-  <button id="reload-btn" style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;">Reload</button>
 </header>
 <div id="graph"></div>
 <div id="sidebar">
@@ -22,6 +21,14 @@
   <div class="panel">
     <h2>Recent Events</h2>
     <ul id="events"></ul>
+  </div>
+  <div class="panel">
+    <h2>Attack Summary</h2>
+    <div id="attack-summary">Loading...</div>
+  </div>
+  <div class="panel">
+    <h2>Timeline</h2>
+    <ol id="timeline" style="font-size:12px;max-height:240px;overflow:auto;"></ol>
   </div>
 </div>
 <footer>Realtime view of Suricata fast.log interpreted for EMR context. (Demo)</footer>

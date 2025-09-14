@@ -43,3 +43,21 @@ class AnalysisResult(BaseModel):
     graph: NetworkGraph
     anomalies: List[AnomalyScore]
     recent_events: List[LogEvent]
+    # Newly added enriched metrics
+    most_aggressive_attacker: Optional[str] = None
+    most_aggressive_attacker_count: int = 0
+    most_attacked_defender: Optional[str] = None
+    most_attacked_defender_count: int = 0
+    timeline: List['TimelineEntry'] = []  # reconstructed aggregated timeline
+
+
+class TimelineEntry(BaseModel):
+    start: datetime
+    end: datetime
+    src_ip: Optional[str]
+    dst_ip: Optional[str]
+    signature: str
+    count: int
+
+# Forward reference resolution
+AnalysisResult.model_rebuild()

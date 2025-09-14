@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
 import math
 import networkx as nx
-from .models import LogEvent, GraphNode, GraphEdge, NetworkGraph, AnomalyScore, AnalysisResult
+from .models import LogEvent, GraphNode, GraphEdge, NetworkGraph, AnomalyScore, AnalysisResult, TimelineEntry
 
 
 def build_graph(events: List[LogEvent]) -> NetworkGraph:
@@ -72,6 +72,53 @@ def anomaly_detection(events: List[LogEvent]) -> List[AnomalyScore]:
     return anomalies[:20]
 
 
+def _attacker_defender_stats(events: List[LogEvent]):
+    attacker_counts = Counter()
+    defender_counts = Counter()
+    for e in events:
+        if e.src_ip:
+            attacker_counts[e.src_ip] += 1
+        if e.dst_ip:
+            defender_counts[e.dst_ip] += 1
+    top_attacker, top_attacker_count = (None, 0)
+    if attacker_counts:
+        top_attacker, top_attacker_count = attacker_counts.most_common(1)[0]
+    top_defender, top_defender_count = (None, 0)
+    if defender_counts:
+        top_defender, top_defender_count = defender_counts.most_common(1)[0]
+    return top_attacker, top_attacker_count, top_defender, top_defender_count
+
+
+def _aggregate_timeline(events: List[LogEvent], gap_seconds: int = 60, max_entries: int = 200) -> List[TimelineEntry]:
+    """Aggregate sequential events with same (src,dst,signature) if close in time.
+
+    gap_seconds: time gap threshold to start new bucket.
+    max_entries: limit for payload size.
+    """
+    if not events:
+        return []
+    # Sort by time ascending for reconstruction
+    ordered = sorted(events, key=lambda e: e.timestamp)
+    buckets: List[TimelineEntry] = []
+    current: TimelineEntry | None = None
+    gap = timedelta(seconds=gap_seconds)
+    for ev in ordered:
+        key = (ev.src_ip, ev.dst_ip, ev.signature)
+        if current and (current.src_ip, current.dst_ip, current.signature) == key and ev.timestamp - current.end <= gap:
+            current.end = ev.timestamp
+            current.count += 1
+        else:
+            # push previous
+            if current:
+                buckets.append(current)
+            current = TimelineEntry(start=ev.timestamp, end=ev.timestamp, src_ip=ev.src_ip, dst_ip=ev.dst_ip, signature=ev.signature, count=1)
+            if len(buckets) >= max_entries:
+                break
+    if current and len(buckets) < max_entries:
+        buckets.append(current)
+    return buckets
+
+
 def run_analysis(events: List[LogEvent]) -> AnalysisResult:
     # Take recent subset (last 24h) if timestamps span large range
     if events:
@@ -82,6 +129,17 @@ def run_analysis(events: List[LogEvent]) -> AnalysisResult:
         recent = []
     graph = build_graph(recent)
     anomalies = anomaly_detection(recent)
+    top_attacker, top_attacker_count, top_defender, top_defender_count = _attacker_defender_stats(recent)
+    timeline = _aggregate_timeline(recent)
     # Only keep last 100 recent events for API payload
     trimmed_recent = sorted(recent, key=lambda e: e.timestamp, reverse=True)[:100]
-    return AnalysisResult(graph=graph, anomalies=anomalies, recent_events=trimmed_recent)
+    return AnalysisResult(
+        graph=graph,
+        anomalies=anomalies,
+        recent_events=trimmed_recent,
+        most_aggressive_attacker=top_attacker,
+        most_aggressive_attacker_count=top_attacker_count,
+        most_attacked_defender=top_defender,
+        most_attacked_defender_count=top_defender_count,
+        timeline=timeline,
+    )
