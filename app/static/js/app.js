@@ -33,29 +33,76 @@ function updateStats(){
 
 function renderAnomalies(anoms){
   const el = document.getElementById('anomalies');
-  el.innerHTML = anoms.map(a=>`<li><strong>${a.entity_id}</strong>: score ${a.score.toFixed(2)} – ${a.reason}</li>`).join('') || '<li>No anomalies</li>';
+  if(!anoms.length){
+    el.innerHTML = '<div class="empty">No anomalies</div>';
+    return;
+  }
+  const rows = anoms.map(a=>{
+    let sevClass = 'sev-low';
+    if(a.score >= 6) sevClass = 'sev-high'; else if(a.score >=4) sevClass='sev-med';
+    return `<tr>
+      <td class="mono ip">${a.entity_id}</td>
+      <td><span class="badge ${sevClass}">${a.score.toFixed(2)}</span></td>
+      <td class="reason">${a.reason}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table class="mini-table"><thead><tr><th>Source</th><th>Z</th><th>Reason</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderEvents(events){
   const el = document.getElementById('events');
-  el.innerHTML = events.map(e=>`<li>${e.timestamp} <span class="bad">[P${e.priority||''}]</span> ${e.src_ip||''}:${e.src_port||''} -> ${e.dst_ip||''}:${e.dst_port||''} <em>${e.signature}</em></li>`).join('');
+  if(!events.length){ el.innerHTML='<div class="empty">No recent events</div>'; return; }
+  el.innerHTML = events.map(e=>{
+    const pri = e.priority!=null?`P${e.priority}`:'P?';
+    const flow = `${e.src_ip||'?'}${e.src_port?':'+e.src_port:''} → ${e.dst_ip||'?'}${e.dst_port?':'+e.dst_port:''}`;
+    const time = new Date(e.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    return `<div class="event-row">
+      <div class="col time">${time}</div>
+      <div class="col pri pri-${e.priority||'x'}">${pri}</div>
+      <div class="col flow mono">${flow}</div>
+      <div class="col sig" title="${e.signature}">${e.signature}</div>
+    </div>`;
+  }).join('');
 }
 
 function renderAttackSummary(data){
   const el = document.getElementById('attack-summary');
   if(!el) return;
   if(!data.most_aggressive_attacker){
-    el.textContent = 'No attacker data.';
+    el.innerHTML = '<div class="empty">No attacker data</div>';
     return;
   }
-  el.innerHTML = `<strong>Most Aggressive Attacker:</strong> ${data.most_aggressive_attacker} (${data.most_aggressive_attacker_count} events)<br/>`+
-                 `<strong>Most Attacked Defender:</strong> ${data.most_attacked_defender||'N/A'} (${data.most_attacked_defender_count||0} events)`;
+  el.innerHTML = `
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="label">Top Attacker</div>
+        <div class="value mono">${data.most_aggressive_attacker}</div>
+        <div class="sub">${data.most_aggressive_attacker_count} evts</div>
+      </div>
+      <div class="metric">
+        <div class="label">Top Defender</div>
+        <div class="value mono">${data.most_attacked_defender||'N/A'}</div>
+        <div class="sub">${data.most_attacked_defender_count||0} evts</div>
+      </div>
+    </div>`;
 }
 
 function renderTimeline(entries){
   const el = document.getElementById('timeline');
   if(!el) return;
-  el.innerHTML = entries.map(t=>`<li><strong>${t.src_ip||'?'} -> ${t.dst_ip||'?'}:</strong> ${t.signature} <span style="color:#999">(${t.count} evts ${t.start} – ${t.end})</span></li>`).join('');
+  if(!entries.length){ el.innerHTML='<li class="empty">No timeline entries</li>'; return; }
+  el.innerHTML = entries.map(t=>{
+    const start = new Date(t.start).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const end = new Date(t.end).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const durMs = (new Date(t.end) - new Date(t.start));
+    const mins = Math.max( (durMs/60000).toFixed(1), 0.1);
+    return `<li class="timeline-entry">
+      <span class="badge count">${t.count}</span>
+      <span class="mono flow">${t.src_ip||'?'} → ${t.dst_ip||'?'}</span>
+      <span class="sig" title="${t.signature}">${t.signature}</span>
+      <span class="range">${start}–${end} <span class="dur">(${mins}m)</span></span>
+    </li>`;
+  }).join('');
 }
 
 // D3 force-directed graph
