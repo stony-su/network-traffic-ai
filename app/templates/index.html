@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EMR Security Network Analyzer</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <!-- Load D3 (defer to ensure available before our app code executes). Removed SRI to avoid mismatch issues. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>EMR Security Network Analyzer</h1>
+  <div id="stats">Loading...</div>
+  <button id="reload-btn" style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;">Reload</button>
+</header>
+<div id="graph"></div>
+<div id="sidebar">
+  <div class="panel">
+    <h2>Anomalies</h2>
+    <ul id="anomalies"></ul>
+  </div>
+  <div class="panel">
+    <h2>Recent Events</h2>
+    <ul id="events"></ul>
+  </div>
+</div>
+<footer>Realtime view of Suricata fast.log interpreted for EMR context. (Demo)</footer>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
